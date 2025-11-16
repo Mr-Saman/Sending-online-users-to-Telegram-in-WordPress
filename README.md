@@ -24,6 +24,7 @@
 - قابل‌تنظیم از بالای فایل (بدون نیاز به ویرایش داخلی کد)  
 - ارسال ایمن با فیلتر و ضد SQL/XSS  
 
+<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/Mr-Saman/Sending-online-users-to-Telegram-in-WordPress/refs/heads/main/Screenshot%202025-11-17%20003456.png" width="400" alt="Laravel Logo"></a></p>
 ---
 
 ### ⚙️ نصب و فعال‌سازی
