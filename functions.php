@@ -1,262 +1,167 @@
 <?php
-//Put Code In functions.php In Your Theme
+/**
+ * Plugin Name: Site Activity Notifier
+ * Description: Send real-time visitor information to Telegram (custom lightweight implementation).
+ * Version: 1.0
+ * Author: Mr-Saman
+ */
 
-function send_online_user_to_telegram() {
+// =======================[ CONFIGURATION ]=======================
+
+// Telegram Bot token and chat ID
+define('TEL_BOT_TOKEN', 'YOUR_BOT_TOKEN');
+define('TEL_CHAT_ID', 'YOUR_CHAT_ID');
+
+// Proxy URL (for environments where Telegram is restricted)
+define('TEL_PROXY_URL', 'https://www.httpdebugger.com/Tools/ViewHttpHeaders.aspx');
+
+// Message language: 'fa' for Persian or 'en' for English
+define('TEL_LANGUAGE', 'en');
+
+// All display texts can be easily modified here
+$tel_texts = [
+    'fa' => [
+        'title'  => 'کاربر جدید در سایت',
+        'ip'     => 'آی‌پی',
+        'os'     => 'سیستم عامل',
+        'agent'  => 'مرورگر',
+        'time'   => 'زمان',
+        'place'  => 'موقعیت',
+        'button' => 'مشاهده صفحه'
+    ],
+    'en' => [
+        'title'  => 'New visitor detected',
+        'ip'     => 'IP Address',
+        'os'     => 'Operating System',
+        'agent'  => 'Browser',
+        'time'   => 'Local Time',
+        'place'  => 'Location',
+        'button' => 'View Page'
+    ]
+];
+
+// ===============================================================
+
+// Enqueue jQuery and output script in the footer
+add_action('wp_enqueue_scripts', function() {
+    wp_enqueue_script('jquery');
+    add_action('wp_footer', 'notify_insert_script', 100);
+});
+
+function notify_insert_script() {
     ?>
-    <script type="text/javascript">
-        jQuery(document).ready(function($) {
-            // ReCheck Clint
-            
-            var interval = 5 * 60 * 1000; // 5 Min
+    <script>
+    jQuery(document).ready(function($) {
+        const INTERVAL = 5 * 60 * 1000; // 5 minutes
+        const lastVisit = localStorage.getItem('lastVisitTime');
+        const lastUrl = localStorage.getItem('lastPageUrl');
+        const now = Date.now();
+        const url = window.location.href;
 
-            // Get Last Time In localStorage
-            var lastVisitTime = localStorage.getItem('lastVisitTime');
-            // Get Last PageURL localStorage
-            var lastPageUrl = localStorage.getItem('lastPageUrl'); 
+        if (!lastVisit || (now - lastVisit > INTERVAL) || lastUrl !== url) {
+            localStorage.setItem('lastVisitTime', now);
+            localStorage.setItem('lastPageUrl', url);
 
-            // Time Now
-            var currentTime = new Date().getTime();
+            const agent = navigator.userAgent;
+            let os = "Unknown";
+            if (/Windows NT 10/.test(agent)) os = "Windows 10";
+            else if (/Linux/.test(agent)) os = "Linux";
+            else if (/Android/.test(agent)) os = "Android";
+            else if (/iPhone|iPad|iPod/.test(agent)) os = "iOS";
+            else if (/Macintosh/.test(agent)) os = "MacOS";
 
-            // Current Page URL Client
-            var currentPageUrl = window.location.href;
-
-            // Check Time And URL 
-            if ((!lastVisitTime || (currentTime - lastVisitTime) > interval) || lastPageUrl !== currentPageUrl) {
-                // ذخیره زمان و آدرس جدید در localStorage
-                localStorage.setItem('lastVisitTime', currentTime);
-                localStorage.setItem('lastPageUrl', currentPageUrl);
-
-                // Get User Agent (سیستم عامل)
-                var userAgent = navigator.userAgent;
-                var os = "نامشخص";
-                if (userAgent.indexOf("Windows NT 10.0") !== -1) os = "ویندوز 10";
-                else if (userAgent.indexOf("Windows NT 6.1") !== -1) os = "ویندوز 7";
-                else if (userAgent.indexOf("Mac") !== -1) os = "مک او اس";
-                else if (userAgent.indexOf("X11") !== -1) os = "لینوکس";
-                else if (userAgent.indexOf("Android") !== -1) os = "اندروید";
-                else if (userAgent.indexOf("iPhone") !== -1) os = "آیفون";
-
-                var page_url3 = window.location.href;
-
-                // Encode UTF-8 URL (fa Character)
-                var encoded_url = encodeURIComponent(page_url3); 
-
-			
-                // Send AJAX Request To Server
-                $.ajax({
-                    url: "<?php echo admin_url('admin-ajax.php'); ?>",
-                    method: "POST",
-                    data: {
-                        action: 'send_online_user_info_to_telegram',
-                        page_url: encoded_url,  // Page URL
-                        user_ip: '<?php echo $_SERVER['REMOTE_ADDR']; ?>', // User IP
-                        os: os,  // User OS
-                        time: new Date().toLocaleString(), // Now Time
-                    },
-                    success: function(response) {
-                        // Success 
-                    }
-                });
-            }
-        });
+            $.post('<?php echo esc_url(admin_url('admin-ajax.php')); ?>', {
+                action: 'send_user_data_to_telegram_custom',
+                page_url: url,
+                os: os,
+                agent: agent,
+                local_time: new Date().toLocaleString()
+            });
+        }
+    });
     </script>
     <?php
 }
 
-add_action('wp_footer', 'send_online_user_to_telegram');
+// Handle AJAX requests (both visitors and logged-in users)
+add_action('wp_ajax_send_user_data_to_telegram_custom', 'send_user_data_to_telegram_custom');
+add_action('wp_ajax_nopriv_send_user_data_to_telegram_custom', 'send_user_data_to_telegram_custom');
 
+function send_user_data_to_telegram_custom() {
+    global $tel_texts;
 
+    $lang = TEL_LANGUAGE;
+    $texts = $tel_texts[$lang];
 
-add_action('wp_footer', 'send_online_user_to_telegram');
+    $page_url  = esc_url_raw($_POST['page_url'] ?? '');
+    $os        = sanitize_text_field($_POST['os'] ?? 'Unknown');
+    $agent     = sanitize_text_field($_POST['agent'] ?? 'N/A');
+    $localtime = sanitize_text_field($_POST['local_time'] ?? current_time('mysql'));
+    $ip        = sanitize_text_field($_SERVER['REMOTE_ADDR']);
 
-// Sending on Telegram even on Iranian servers (without filters)
-function send_online_user_info_to_telegram() {
-    if (isset($_POST['page_url']) && isset($_POST['user_ip'])) {
-        // Client Information
-        $page_url = urldecode($_POST['page_url']);          // Page URL Decode
-        $user_ip = sanitize_text_field($_POST['user_ip']);   // IP
-        $os = sanitize_text_field($_POST['os']);             // OS
-        $time = sanitize_text_field($_POST['time']);         // Visit Time
-		
-
-		// Fix Bug URL And Re-Decode
-		$decoded_url = urldecode($page_url);
-		
-		// Get Location Via Ip
-        $url = "https://ipinfo.io/{$user_ip}/json";
-        $response = wp_remote_get($url);
-        
-        if (is_wp_error($response)) {
-            $location = "مکان نامشخص";
-            $country = "نامشخص";
-            $flag = "🌍";
-        } else {
-            $data = json_decode(wp_remote_retrieve_body($response));
-            $location = isset($data->city) ? $data->city : "نامشخص";
-            $country = isset($data->country) ? $data->country : "نامشخص";
-            $flag = get_country_flag($country);  // Flag Emoji By Country
-        }
-
-		
-        // BOT AND CHAT-ID
-        $TokenBot = "<YOUR-BOT-TOKEN>";  // Enter Bot Token In "" -> Create In https://t.me/BotFather 
-        $ChatId = "<YOUR-CHAT-ID>";  // Enter CHAT ID In "" -> Get in Start Bot https://t.me/chatIDrobot
-        
-        //
-        //
-        // ** Be sure to start the robot you are building and send it a message to confirm. **
-        //
-        // ******************** ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ****************************
-
-        // Create Message
-        $message = "🖥 کاربر آنلاین در سایت:
-        		
-        🌍 آی‌پی کاربر: {$user_ip}
-        🖥 سیستم عامل: {$os}
-        ⏰ زمان بازدید: {$time}
-        
-        🌍 موقعیت مکانی: {$location}, {$country} {$flag}
-		
-		⌨️ Code By @Samansle
-        ";
-		
-        // Create Button
-		 $keyboard = [
-            'inline_keyboard' => [
-                [
-                    ['text' => 'بازدید از صفحه 🌐', 'url' => $decoded_url],  // Button With URL Link
-                ],
-            ],
-        ];
-        $keyboard = json_encode($keyboard);
-
-
-        // Telegram Api Register
-        $TelegramApiUrl = "https://api.telegram.org/bot{$TokenBot}/sendMessage?chat_id={$ChatId}&text=" . urlencode($message). "&reply_markup=" . urlencode($keyboard);
-
-		
-		// Using HttpDebug To << Bypass The Filter >>
-        $HttpDebug = "https://www.httpdebugger.com/Tools/ViewHttpHeaders.aspx";
-        
-        // Create Payload HttpDebug
-        $Payloads = [
-            "UrlBox"       => $TelegramApiUrl,
-            "AgentList"    => "Mozilla Firefox",
-            "VersionsList" => "HTTP/1.1",
-            "MethodList"   => "POST"
-        ];
-
-        // Running Code Behind The Program Without Wasting Time ** :)
-        $args = [
-            'method'    => 'POST', 
-            'blocking'  => false,  
-            'timeout'   => 15,      // TimeOut
-            'headers'   => [
-                'Content-Type' => 'application/json',
-            ],
-            'body'      => json_encode($Payloads),
-        ];
-
-        // Send API Request  
-        wp_remote_post($HttpDebug, $args);
-
+    // Get location via IP (primary: ipinfo, fallback: ip-api)
+    $geo = get_geo_from_ipinfo($ip);
+    if ($geo['country'] === '??') {
+        $geo = get_geo_from_ipapi($ip);
     }
 
-    // Close AjaxRequest
+    $message = "{$texts['title']}\n\n"
+             . "{$texts['ip']}: {$ip}\n"
+             . "{$texts['os']}: {$os}\n"
+             . "{$texts['agent']}: {$agent}\n"
+             . "{$texts['time']}: {$localtime}\n"
+             . "{$texts['place']}: {$geo['location']}, {$geo['country']}";
+
+    $keyboard = json_encode([
+        'inline_keyboard' => [
+            [['text' => $texts['button'], 'url' => esc_url_raw($page_url)]]
+        ]
+    ]);
+
+    $telegram_url = sprintf(
+        "https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s&reply_markup=%s",
+        TEL_BOT_TOKEN,
+        TEL_CHAT_ID,
+        urlencode($message),
+        urlencode($keyboard)
+    );
+
+    // Send via proxy (for restricted regions)
+    wp_remote_post(TEL_PROXY_URL, [
+        'method'  => 'POST',
+        'blocking' => false,
+        'timeout' => 15,
+        'headers' => ['Content-Type' => 'application/json'],
+        'body'    => wp_json_encode([
+            "UrlBox" => $telegram_url,
+            "AgentList" => "Mozilla Firefox",
+            "VersionsList" => "HTTP/1.1",
+            "MethodList" => "POST"
+        ])
+    ]);
+
     wp_die();
 }
 
-// Ajax action
-add_action('wp_ajax_send_online_user_info_to_telegram', 'send_online_user_info_to_telegram'); 
-add_action('wp_ajax_nopriv_send_online_user_info_to_telegram', 'send_online_user_info_to_telegram'); 
+// -----------------[ Helper Functions ]-----------------
 
-// Flags
-function get_country_flag($country_code) {
-    $flags = [
-        'US' => '🇺🇸', // آمریکا
-        'GB' => '🇬🇧', // بریتانیا
-        'CA' => '🇨🇦', // کانادا
-        'DE' => '🇩🇪', // آلمان
-        'FR' => '🇫🇷', // فرانسه
-        'IT' => '🇮🇹', // ایتالیا
-        'IN' => '🇮🇳', // هند
-        'RU' => '🇷🇺', // روسیه
-        'BR' => '🇧🇷', // برزیل
-        'AU' => '🇦🇺', // استرالیا
-        'CN' => '🇨🇳', // چین
-        'JP' => '🇯🇵', // ژاپن
-        'KR' => '🇰🇷', // کره جنوبی
-        'ZA' => '🇿🇦', // آفریقای جنوبی
-        'MX' => '🇲🇽', // مکزیک
-        'ES' => '🇪🇸', // اسپانیا
-        'PT' => '🇵🇹', // پرتغال
-        'NG' => '🇳🇬', // نیجریه
-        'EG' => '🇪🇬', // مصر
-        'TR' => '🇹🇷', // ترکیه
-        'SA' => '🇸🇦', // عربستان سعودی
-        'KR' => '🇰🇷', // کره جنوبی
-        'SE' => '🇸🇪', // سوئد
-        'PL' => '🇵🇱', // لهستان
-        'FI' => '🇫🇮', // فنلاند
-        'NO' => '🇳🇴', // نروژ
-        'BE' => '🇧🇪', // بلژیک
-        'AT' => '🇦🇹', // اتریش
-        'CH' => '🇨🇭', // سوئیس
-        'DK' => '🇩🇰', // دانمارک
-        'IR' => '🇮🇷', // ایران
-        'AE' => '🇦🇪', // امارات متحده عربی
-        'KW' => '🇰🇼', // کویت
-        'OM' => '🇴🇲', // عمان
-        'QA' => '🇶🇦', // قطر
-        'BH' => '🇧🇭', // بحرین
-        'LY' => '🇱🇾', // لیبی
-        'JO' => '🇯🇴', // اردن
-        'LB' => '🇱🇧', // لبنان
-        'SY' => '🇸🇾', // سوریه
-        'YE' => '🇾🇪', // یمن
-        'IQ' => '🇮🇶', // عراق
-        'AF' => '🇦🇫', // افغانستان
-        'PK' => '🇵🇰', // پاکستان
-        'BD' => '🇧🇩', // بنگلادش
-        'MM' => '🇲🇲', // میانمار
-        'VN' => '🇻🇳', // ویتنام
-        'TH' => '🇹🇭', // تایلند
-        'PH' => '🇵🇭', // فیلیپین
-        'ID' => '🇮🇩', // اندونزی
-        'KH' => '🇰🇭', // کامبوج
-        'LA' => '🇱🇦', // لائوس
-        'SG' => '🇸🇬', // سنگاپور
-        'MY' => '🇲🇾', // مالزی
-        'TW' => '🇹🇼', // تایوان
-        'HK' => '🇭🇰', // هنگ کنگ
-        'MO' => '🇲🇴', // ماکائو
-        'MZ' => '🇲🇿', // موزامبیک
-        'KE' => '🇰🇪', // کنیا
-        'UG' => '🇺🇬', // اوگاندا
-        'TZ' => '🇹🇿', // تانزانیا
-        'ZW' => '🇿🇼', // زیمبابوه
-        'ET' => '🇪🇹', // اتیوپی
-        'KE' => '🇰🇪', // کنیا
-        'GH' => '🇬🇭', // غنا
-        'ZW' => '🇿🇼', // زیمبابوه
-        'SN' => '🇸🇳', // سنگال
-        'KE' => '🇰🇪', // کنیا
-        'UG' => '🇺🇬', // اوگاندا
-        'TZ' => '🇹🇿', // تانزانیا
-        'NG' => '🇳🇬', // نیجریه
-        'MW' => '🇲🇼', // مالاوی
-        'BJ' => '🇧🇯', // بنین
-        'ZM' => '🇿🇲', // زامبیا
-        'RW' => '🇷🇼', // رواندا
-        'LR' => '🇱🇷', // لیبریا
-        'MW' => '🇲🇼', // مالاوی
+function get_geo_from_ipinfo($ip) {
+    $res = wp_remote_get("https://ipinfo.io/{$ip}/json");
+    if (is_wp_error($res)) return ['location' => 'Unknown', 'country' => '??'];
+    $data = json_decode(wp_remote_retrieve_body($res), true);
+    return [
+        'location' => sanitize_text_field($data['city'] ?? 'Unknown'),
+        'country'  => sanitize_text_field($data['country'] ?? '??')
     ];
-
-    // Return Flags
-    return isset($flags[$country_code]) ? $flags[$country_code] : '🌍';
 }
 
-
-
-
-?>
+function get_geo_from_ipapi($ip) {
+    $res = wp_remote_get("http://ip-api.com/json/{$ip}?fields=status,country,city");
+    if (is_wp_error($res)) return ['location' => 'Unknown', 'country' => '??'];
+    $data = json_decode(wp_remote_retrieve_body($res), true);
+    if (($data['status'] ?? '') !== 'success') return ['location' => 'Unknown', 'country' => '??'];
+    return [
+        'location' => sanitize_text_field($data['city'] ?? 'Unknown'),
+        'country'  => sanitize_text_field($data['country'] ?? '??')
+    ];
+}
